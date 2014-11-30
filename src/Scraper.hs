@@ -83,9 +83,10 @@ printDiffs newGoods newBads oldGoods oldBads =
 modernize :: Models -> Models -> IO ()
 modernize newGoods newBads =
   do
-    writeFile goodsFile $ toJSON newGoods
-    writeFile badsFile  $ toJSON newBads
+    writeSetToFile newGoods goodsFile
+    writeSetToFile newBads  badsFile
   where
+    writeSetToFile set file = writeFile file $ toJSON set
     toJSON = Set.toList >>> encode >>> unpack
 
 statusOracleURL :: URL
