@@ -8,6 +8,7 @@ import Control.Exception(try)
 
 import Data.Aeson(decode, encode, FromJSON)
 import Data.ByteString.Lazy.Char8(pack, unpack)
+import Data.Foldable(Foldable, toList)
 import Data.Function(on)
 import Data.List(groupBy, intercalate, sort, sortBy)
 import Data.Map(lookup, Map)
@@ -28,8 +29,6 @@ data Status = Status { status :: String } deriving (Generic, Show)
 
 instance FromJSON Status
 
-a |> f = f a
-
 main :: IO ()
 main =
   do
@@ -43,12 +42,20 @@ findGoodsAndBads =
   do
     jsonStr <- simpleHTTP (getRequest statusOracleURL) >>= getResponseBody
     let modelToStatusMap = jsonStr |> (decodeAsMap >>> (fmap $ status >>> (== goodStatus)))
-    let statusToModelMap = modelToStatusMap |> (Map.toList >>> (scalaGroupBy snd) >>> Map.fromList >>> (fmap $ fmap fst))
-    let extractFromBool  = (flip lookup statusToModelMap) >>> (fromMaybe []) >>> Set.fromList
+    let statusToModelMap = flipMap modelToStatusMap
+    let extractFromBool  = (flip lookup statusToModelMap) >>> (fromMaybe Set.empty)
     return (extractFromBool True, extractFromBool False)
   where
+    flipMap          = Map.toList >>> (scalaGroupBy snd) >>> groupedToMapPair >>> Map.fromList
+    groupedToMapPair = fmap (\(a, bs) -> (a, bs |> ((fmap fst) >>> Set.fromList)))
+    tee f            = fmap $ f &&& id
     decodeAsMap :: String -> Map String Status
-    decodeAsMap = pack >>> decode >>> (fromMaybe Map.empty)
+    decodeAsMap    = pack >>> decode >>> (fromMaybe Map.empty)
+    scalaGroupBy f = sort >>> group >>> pair
+      where
+        sort  = sortBy (compare `on` f)
+        group = groupBy ((==) `on` f)
+        pair  = tee $ head >>> f
 
 findOldGoodsAndBads :: IO (Models, Models)
 findOldGoodsAndBads =
@@ -65,7 +72,7 @@ findOldGoodsAndBads =
       do
         jsonStrEither <- safeReadFile filepath
         let jsonStr  = either (const "[]") id jsonStrEither
-        let modelSet = jsonStr |> (decodeAsStrArr >>> (fromMaybe []) >>> Set.fromList)
+        let modelSet = jsonStr |> (decodeAsStrArr >>> maybeFToSet)
         return modelSet
 
 printDiffs :: Models -> Models -> Models -> Models -> IO ()
@@ -101,5 +108,7 @@ badsFile = "bads.json"
 goodStatus :: String
 goodStatus = "compiling"
 
-scalaGroupBy :: (Ord b) => (a -> b) -> [a] -> [(b, [a])]
-scalaGroupBy f = ((sortBy (compare `on` f)) >>> (groupBy ((==) `on` f)) >>> (fmap ((head >>> f) &&& id)))
+maybeFToSet :: (Foldable f, Ord a) => Maybe (f a) -> Set a
+maybeFToSet = (fmap toList) >>> (fromMaybe []) >>> Set.fromList
+
+a |> f = f a
